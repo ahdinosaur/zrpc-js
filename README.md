@@ -1,6 +1,8 @@
-# zrpc
+# zrpc-js
 
-rpc services inspired by muxrpc and based on zmq
+rpc micro-services inspired by [muxrpc](https://github.com/ssbc/muxrpc) and serverless functions, based on [zmq](http://zeromq.org)
+
+_work in progress_
 
 ```shell
 npm install --save zrpc
@@ -8,46 +10,66 @@ npm install --save zrpc
 
 ## concepts
 
-- main service input: request / reply
-  - use a router / dealer to handle requests async
-- methods
-  - if sync or async methods, rep returns value
-  - if source, rep returns pull address
-  - if sink, rep returns push address
-- subscriptions
-  - server can publish messages to all clients
+a manifest is for a single "serverless" function service.
 
-- async
-- source
-- sink
+the manifest allows the client to connect to the server.
 
+the client uses the address of the server to identify it.
 
-- responders
-- sources
-- sinks
-- 
+the server gives the client an identity.
+
+the server responds using the service handler.
+
+for source, sink, duplex responses, the service handler will respond with new address(es) to connect.
+
+TODO status subscriptions: server can publish messages to all clients
 
 ### manifest
 
 object representing a service manifest
 
-- address: `String` service identifier
+- address: `String` service identifier (starting with `tcp://`, `ipc://`, etc)
 - type: enum of `sync`, `async`, `source`, `sink`, `duplex`
 
 on a server manifest
 
 - handler: a function to handle service call
 
+## example
+
+```js
+const { join } = require('path')
+const zrpc = require('../')
+
+const helloSync = {
+  address: `ipc://${join(__dirname, 'example.socket')}`,
+  type: 'sync',
+  handle: function ({ name }) {
+    return 'hello, ' + name + '!'
+  }
+}
+
+run()
+
+async function run () {
+  const server = zrpc.Server(helloSync)
+  await server.start()
+
+  const client = zrpc.Client(helloSync)
+  await client.start()
+
+  const response = await client.handle({ name: 'dinosaur' })
+  console.log(response)
+}
+```
+
 ## api
 
 ### `zrpc = require('zrpc')`
 
-### `zrpc.Server(manifest)`
+### `server = zrpc.Server(manifest)`
 
-### `zrpc.Client(manifest)`
-
-## usage
-
+### `client = zrpc.Client(manifest)`
 
 ## license
 

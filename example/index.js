@@ -1,49 +1,23 @@
 const { join } = require('path')
-const pull = require('pull-stream')
-const zrpc = require('./')
+const zrpc = require('../')
 
-const manifest = {
-  address: `ipc://${join(__dirname, 'ipc')}`,
-
-  methods: [
-    {
-      name: 'hello',
-      type: 'async',
-      fn: function ({ name }) {
-        return cb => cb('hello, ' + name + '!')
-      }
-    },
-    {
-      name: 'stuff',
-      type: 'source',
-      fn: function () {
-        return pull.values([1, 2, 3, 4, 5])
-      }
-    }
-  ]
+const helloSync = {
+  address: `ipc://${join(__dirname, 'example.socket')}`,
+  type: 'sync',
+  handle: function ({ name }) {
+    return 'hello, ' + name + '!'
+  }
 }
 
-const client = zrpc.Client(manifest)
+run()
 
-zrpc.Server(manifest, function (err, server) {
-  if (err) throw err
+async function run () {
+  const server = zrpc.Server(helloSync)
+  await server.start()
 
-  client.methods.hello('world')((err, value) => {
-    if (err) throw err
+  const client = zrpc.Client(helloSync)
+  await client.start()
 
-    console.log(value)
-    // hello, world!
-  })
-
-  pull(
-    client.methods.stuff(),
-    pull.drain(console.log)
-  )
-  // 1
-  // 2
-  // 3
-  // 4
-  // 5
-})
-
-
+  const response = await client.handle({ name: 'dinosaur' })
+  console.log(response)
+}

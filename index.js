@@ -1,110 +1,151 @@
 const Logger = require('pino')
 const LoggerSerializers = require('pino-std-serializers')
+const zmq = require('zeromq-ng')
 
 module.exports = {
-  Service,
+  Server,
   Client
 }
 
-function Server (manifest, context) {
-  const { ipcPath } = manifest
-  const {
-    logger = Logger()
-  } = context
+function Server (manifest, context = {}) {
+  const { address, type, handle } = manifest
+  const { logger = Logger() } = context
+  
+  const log = logger.child({ node: 'server', address })
 
-  var server = {
-    methods: {},
-    subscriptions: {}
-  }
-
-  manifestMethods = manifest.methods || []
-  manifestMethods.forEach(method => {
-    const { name, type, fn } = method
-    server.methods[method.name] = ServerMethod({ ipcPath, logger, name, type, fn })
+  const socket = new zmq.Router({
+    routingId: address
   })
 
-  return server
-}
-
-function ServerMethod ({ ipcPath, logger, name, type, fn }) {
-  const log = logger.child({ node: 'server', method: name })
-
-  if (type === 'sync') {
-    // coerce into async method
-    type = 'async'
-    var syncFn = fn
-    fn = (...args) => {
-      return cb => {
-        try {
-          cb(null, syncFn(...args))
-        } catch (err) {
-          cb(err)
-        }
-      }
-    }
+  return {
+    address,
+    type,
+    handle,
+    start,
+    stop
   }
 
-  if (type === 'async') {
-    // create socket
-    var responder = zmq.socket('rep')
-    responder.on('message', function (requestJson) {
+  async function start () {
+    await socket.bind(address)
+    log.info('bound')
+
+    loop()
+  }
+
+  async function loop () {
+    while (!socket.closed) {
+      const [clientAddress, _1, controlBuffer, _2, requestBuffer] = await socket.receive()
+      const control = controlBuffer.toString()
+      const requestString = requestBuffer.toString()
+      log.info({ msg: `received message from client`, clientAddress, control, requestString })
+
+      var message = [clientAddress, null, control, null]
+
+      if (control === 'PING') {
+        message[2] = 'PONG'
+        await send({ log, message, socket })
+        break
+      }
+
       try {
-        var request = JSON.parse(requestJson)
-      } catch (err) {
-        if (err) {
-          log.error(err)
-          sendError(responder, err)
-          return
+        var request = JSON.parse(requestString)
+      } catch (error) {
+        if (error) {
+          await sendError({ error, log, message, socket })
+          break
         }
       }
 
       log.info({ request })
 
-      fn(request)((err, response) => {
-        if (err) {
-          log.error(err)
-          sendError(responder, err)
-          return
+      if (type === 'sync' || type === 'async') {
+        try {
+          var response = await handle(request)
+        } catch (error) {
+          await sendError({ error, log, message, socket })
+          break
         }
 
-        log.info({ response })
-
-        var responseJson = JSON.stringify(response)
-        responder.send(responseJson)
-      })
-    })
-  } else if (type === 'source') {
+        await sendResponse({ log, message, response, socket })
+      }
+    }
   }
 
-  if (responder) responder.bindSync(`${ipcPath}/${name}/rep`)
-  if (pusher) pusher.bindSync(`${ipcPath}/${name}/push`)
-  if (puller) puller.bindSync(`${ipcPath}/${name}/pull`)
-
-  return fn
+  async function stop () {
+    if (!socket.closed) {
+      await socket.close()
+    }
+  }
 }
 
-function Client (manifest) {
-  const { ipcPath } = manifest
+function Client (manifest, context = {}) {
+  const { address, type } = manifest
+  const { logger = Logger() } = context
+  
+  const log = logger.child({ node: 'client', address })
 
-  var client = {
-    methods: {},
-    subscriptions: {}
+  const socket = new zmq.Router({})
+
+  return {
+    address,
+    type,
+    handle,
+    start,
+    stop
   }
 
-  manifestMethods = manifest.methods || []
-  manifestMethods.forEach(manifestMethod => {
-    const {
-      name,
-      type,
-    } = manifestMethod
+  async function handle (request) {
+    const control = 'TODO'
+    const requestString = JSON.stringify(request)
+    const message = [address, null, control, null, requestString]
+    send({ log, message, socket })
+    const [serverAddress, _1, responseControlBuffer, _2, responseTypeBuffer, responseBuffer] = await socket.receive()
+    const responseControl = responseControlBuffer.toString()
+    const responseType = responseTypeBuffer.toString()
+    const responseString = responseBuffer.toString()
+    log.info({ msg: `received message from server`, serverAddress, responseControl, responseType, responseString })
+    const response = JSON.parse(responseString)
+    if (responseType === 'ERROR') {
+      return Promise.reject(response)
+    }
+    return response
+  }
 
-  })
+  async function start () {
+    await socket.connect(address)
+    log.info('connected')
+  }
 
-  return client
+  async function stop () {
+    if (!socket.closed) {
+      await socket.close()
+    }
+  }
 }
 
-function sendError (responder, err) {
-  responder.send({
-    error: LoggerSerializers.err(error)
-  })
+async function sendError ({ error, log, message, socket }) {
+  log.error(error)
+
+  message[4] = 'ERROR'
+  message[5] = LoggerSerializers.err(error)
+
+  await send({ log, message, socket })
+}
+
+async function sendResponse ({ log, message, response, socket }) {
+  log.info({ response })
+
+  message[4] = 'RESPONSE'
+  message[5] = JSON.stringify(response)
+
+  await send({ log, message, socket })
+}
+
+async function send ({ log, message, socket }) {
+  log.info({ msg: `sending message`, message })
+  try {
+    await socket.send(message)
+  } catch (error) {
+    log.error({ msg: `unable to send message`, message })
+  }
 }
