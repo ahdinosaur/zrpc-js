@@ -1,6 +1,6 @@
 # zrpc-js
 
-rpc micro-services inspired by [muxrpc](https://github.com/ssbc/muxrpc) and serverless functions, based on [zmq](http://zeromq.org)
+rpc micro-services inspired by [muxrpc](https://github.com/ssbc/muxrpc) and "serverless" functions, based on [zmq](http://zeromq.org)
 
 _work in progress_
 
@@ -9,6 +9,8 @@ npm install --save zrpc
 ```
 
 ## concepts
+
+based on [zmq freelance pattern](http://zguide.zeromq.org/page:all#Brokerless-Reliability-Freelance-Pattern).
 
 a manifest is for a single "serverless" function service.
 
